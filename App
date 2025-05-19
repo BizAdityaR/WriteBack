@@ -1,0 +1,54 @@
+from fastapi import FastAPI, HTTPException
+from pydantic import BaseModel
+import pyodbc
+
+app = FastAPI()
+
+# Update this with your actual database details
+server = 'sqlserver-deaccelerator-dev.database.windows.net'
+database = 'acceleratorsqldb'  # Replace with actual name
+username = 'Deaccadmindev'
+password = 'jbu?}v-AY;)7Gf"!'  # Replace with actual password
+
+# ODBC connection string
+conn_str = f'DRIVER={{ODBC Driver 17 for SQL Server}};SERVER={server};DATABASE={database};UID={username};PWD={password}'
+
+class Feedback(BaseModel):
+    user_id: int
+    comment: str
+    dashboard_name: str
+    timestamp: str  # Format: 'YYYY-MM-DD HH:MM:SS'
+
+@app.post("/writeback")
+def write_back_data(data: Feedback):
+    try:
+        conn = pyodbc.connect(conn_str)
+        cursor = conn.cursor()
+
+        # Optional: Create table if it doesn't exist
+        cursor.execute("""
+            IF NOT EXISTS (
+                SELECT * FROM INFORMATION_SCHEMA.TABLES 
+                WHERE TABLE_NAME = 'DashboardFeedback'
+            )
+            CREATE TABLE DashboardFeedback (
+                user_id INT,
+                comment NVARCHAR(MAX),
+                dashboard_name NVARCHAR(255),
+                timestamp DATETIME
+            )
+        """)
+
+        # Insert the data
+        insert_query = """
+            INSERT INTO DashboardFeedback (user_id, comment, dashboard_name, timestamp)
+            VALUES (?, ?, ?, ?)
+        """
+        cursor.execute(insert_query, data.user_id, data.comment, data.dashboard_name, data.timestamp)
+        conn.commit()
+        conn.close()
+
+        return {"status": "success", "message": "Data written to Azure SQL successfully."}
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
