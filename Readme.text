@@ -1,0 +1,127 @@
+Power BI/Power Apps Write-Back to Azure SQL via Azure Function
+This solution enables dynamic data write-back from Power Apps (or Power BI) to Azure SQL Database using an Azure Function and Power Automate flow.
+
+It supports:
+
+✅ Dynamic table selection (Test, Customer_Details)
+
+✅ Dynamic column handling (no hardcoded fields)
+
+✅ Upsert logic (update if exists, insert if not)
+
+✅ Secure table whitelist to prevent SQL injection
+
+📁 Components
+Component	Description
+Power Apps	UI where users select the table, enter data, and trigger the flow
+Power Automate	Receives JSON payload from Power Apps and posts it to Azure Function
+Azure Function	Receives the request, processes data dynamically, and writes to Azure SQL
+
+🚀 How It Works
+User selects a table from a dropdown (e.g., "Test" or "Customer_Details") in Power Apps.
+
+Power Apps builds a dynamic JSON payload.
+
+The Power Automate Flow takes this payload and sends it to an Azure Function via an HTTP POST request.
+
+The Azure Function:
+
+Validates the payload
+
+Checks if a row with the specified key exists
+
+Updates or inserts accordingly into the whitelisted table
+
+Azure SQL Database is updated in real time.
+
+🛠️ Setup Instructions
+1. Azure Function Deployment
+Use the provided function_app.py file.
+
+Ensure your Azure SQL connection string is updated.
+
+Whitelist your allowed tables:
+
+python
+Copy
+Edit
+allowed_tables = {
+  "Test": "[Config].[Test]",
+  "Customer_Details": "[Config].[Customer_Details]"
+}
+2. Power Automate Flow
+Create a new flow triggered by Power Apps V2.
+
+Add an HTTP action to:
+
+Method: POST
+
+URI: Azure Function URL with function key
+
+Headers: Content-Type: application/json
+
+Body: @triggerBody()['payload']
+
+3. Power Apps
+Add controls:
+
+Dropdown: ddlTable (with values Test, Customer_Details)
+
+Text inputs: e.g., txtJobID, txtCst_ID, txtStatus, etc.
+
+On button OnSelect, use:
+
+powerapps
+Copy
+Edit
+Set(
+    response,
+    WriteBackFlow.Run(
+        JSON(
+            {
+                Table: ddlTable.Selected.Value,
+                JobID: Value(txtJobID.Text),
+                Cst_ID: Value(txtCstID.Text),
+                Status: txtStatus.Text,
+                Cst_Details: txtDetails.Text,
+                Cst_Comments: txtComments.Text
+            }
+        )
+    )
+)
+🔐 Security Best Practices
+Never allow raw table names from users; use whitelisting
+
+Store database credentials securely (e.g., Azure Key Vault)
+
+Enable CORS restrictions on your Azure Function
+
+Add API Management layer if exposing the Function publicly
+
+✅ Supported Tables & Keys
+Table Name	SQL Name	Primary Key
+Test	[Config].[Test]	JobID
+Customer_Details	[Config].[Customer_Details]	Cst_ID
+
+📦 Sample JSON Payload
+json
+Copy
+Edit
+{
+  "Table": "Test",
+  "JobID": 101,
+  "Status": "Active",
+  "SourceSchema": "dbo",
+  "TargetTable": "FinalTarget"
+}
+json
+Copy
+Edit
+{
+  "Table": "Customer_Details",
+  "Cst_ID": 2001,
+  "Cst_Details": "Gold Tier",
+  "Cst_Comments": "Updated from Power BI"
+}
+📬 Support
+For questions or enhancements, contact [your-team-email@example.com].
