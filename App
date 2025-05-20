@@ -5,10 +5,10 @@ import pyodbc
 app = FastAPI()
 
 # Update this with your actual database details
-server = 'sqlserver-deaccelerator-dev.database.windows.net'
-database = 'acceleratorsqldb'  # Replace with actual name
-username = 'Deaccadmindev'
-password = 'jbu?}v-AY;)7Gf"!'  # Replace with actual password
+server = 'sqlserver-<database name >.database.windows.net'
+database = 'DataBase'  # Replace with actual name
+username = 'username' # change the username
+password = 'abcd'  # Replace with actual password
 
 # ODBC connection string
 conn_str = f'DRIVER={{ODBC Driver 17 for SQL Server}};SERVER={server};DATABASE={database};UID={username};PWD={password}'
