@@ -1,54 +1,89 @@
-from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel
-import pyodbc
+import azure.functions as func
+import logging
+import json
+import pymssql
 
-app = FastAPI()
+# Create the Azure Function app instance
+app = func.FunctionApp(http_auth_level=func.AuthLevel.FUNCTION)
 
-# Update this with your actual database details
-server = 'sqlserver-<database name >.database.windows.net'
-database = 'DataBase'  # Replace with actual name
-username = 'username' # change the username
-password = 'abcd'  # Replace with actual password
+@app.route(route="WriteBackPBI")
+def WriteBackPBI(req: func.HttpRequest) -> func.HttpResponse:
+    logging.info("Function triggered for dynamic write-back")
 
-# ODBC connection string
-conn_str = f'DRIVER={{ODBC Driver 17 for SQL Server}};SERVER={server};DATABASE={database};UID={username};PWD={password}'
-
-class Feedback(BaseModel):
-    user_id: int
-    comment: str
-    dashboard_name: str
-    timestamp: str  # Format: 'YYYY-MM-DD HH:MM:SS'
-
-@app.post("/writeback")
-def write_back_data(data: Feedback):
     try:
-        conn = pyodbc.connect(conn_str)
+        # Parse incoming JSON body
+        req_body = req.get_json()
+
+        if "Table" not in req_body:
+            return func.HttpResponse("Missing required field: 'Table'", status_code=400)
+
+        table_key = req_body["Table"]
+
+        #  Allowed table whitelist with primary key
+        allowed_tables = {
+            "Test": {
+                "sql_name": "[Config].[Test]",
+                "key": "JobID"
+            },
+            "Customer_Details": {
+                "sql_name": "[Config].[Customer_Details]",
+                "key": "Cst_ID"
+            }
+        }
+
+        if table_key not in allowed_tables:
+            return func.HttpResponse("Unauthorized or unknown table", status_code=403)
+
+        table_info = allowed_tables[table_key]
+        table_name = table_info["sql_name"]
+        primary_key = table_info["key"]
+
+        if primary_key not in req_body:
+            return func.HttpResponse(f"Missing required primary key: '{primary_key}'", status_code=400)
+
+        #  Clean input for actual columns
+        clean_data = {k: v for k, v in req_body.items() if k != "Table" and v is not None}
+
+        if len(clean_data) <= 1:
+            return func.HttpResponse("No valid data to insert/update", status_code=400)
+
+        #  Connect to SQL Server
+        conn = pymssql.connect(
+            server='sqlserver-<Database >-dev.database.windows.net', # change it with your Servr name 
+            user='<Your user name>', # change it wit your user name 
+            password='<your password>', # change it with your password 
+            database='<DataBase Name>' # change it with your Database 
+        )
         cursor = conn.cursor()
 
-        # Optional: Create table if it doesn't exist
-        cursor.execute("""
-            IF NOT EXISTS (
-                SELECT * FROM INFORMATION_SCHEMA.TABLES 
-                WHERE TABLE_NAME = 'DashboardFeedback'
-            )
-            CREATE TABLE DashboardFeedback (
-                user_id INT,
-                comment NVARCHAR(MAX),
-                dashboard_name NVARCHAR(255),
-                timestamp DATETIME
-            )
-        """)
+        #  Check for existing record
+        pk_value = clean_data[primary_key]
+        cursor.execute(f"SELECT COUNT(*) FROM {table_name} WHERE {primary_key} = %s", (pk_value,))
+        exists = cursor.fetchone()[0] > 0
 
-        # Insert the data
-        insert_query = """
-            INSERT INTO DashboardFeedback (user_id, comment, dashboard_name, timestamp)
-            VALUES (?, ?, ?, ?)
-        """
-        cursor.execute(insert_query, data.user_id, data.comment, data.dashboard_name, data.timestamp)
+        if exists:
+            # Build UPDATE query
+            update_columns = ", ".join(f"{col} = %s" for col in clean_data if col != primary_key)
+            update_values = [clean_data[col] for col in clean_data if col != primary_key]
+            update_values.append(pk_value)
+            update_query = f"UPDATE {table_name} SET {update_columns} WHERE {primary_key} = %s"
+            cursor.execute(update_query, update_values)
+            message = f" Updated {primary_key} = {pk_value} in '{table_key}'"
+        else:
+            # Build INSERT query
+            columns = ", ".join(clean_data.keys())
+            placeholders = ", ".join(["%s"] * len(clean_data))
+            values = list(clean_data.values())
+            insert_query = f"INSERT INTO {table_name} ({columns}) VALUES ({placeholders})"
+            cursor.execute(insert_query, values)
+            message = f" Inserted {primary_key} = {pk_value} into '{table_key}'"
+
         conn.commit()
+        cursor.close()
         conn.close()
 
-        return {"status": "success", "message": "Data written to Azure SQL successfully."}
+        return func.HttpResponse(message, status_code=200)
 
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logging.error(f" Error occurred: {e}")
+        return func.HttpResponse(f"Internal server error: {str(e)}", status_code=500)
